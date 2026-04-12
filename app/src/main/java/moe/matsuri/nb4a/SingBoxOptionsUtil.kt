@@ -6,21 +6,21 @@ import moe.matsuri.nb4a.SingBoxOptions.RuleSet
 object SingBoxOptionsUtil {
 
     fun domainStrategy(tag: String): String {
-        fun auto2(key: String, newS: String): String {
-            return (DataStore.configurationStore.getString(key) ?: "").replace("auto", newS)
+        fun auto2(value: String, autoReplacement: String): String {
+            return value.replace("auto", autoReplacement)
         }
         return when (tag) {
             "dns-remote" -> {
-                auto2("domain_strategy_for_remote", "")
+                auto2(DataStore.domainStrategyForRemote, "")
             }
 
             "dns-direct" -> {
-                auto2("domain_strategy_for_direct", "")
+                auto2(DataStore.domainStrategyForDirect, "")
             }
 
             // server
             else -> {
-                auto2("domain_strategy_for_server", "prefer_ipv4")
+                auto2(DataStore.domainStrategyForServer, "prefer_ipv4")
             }
         }
     }

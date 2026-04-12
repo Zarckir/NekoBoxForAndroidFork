@@ -203,4 +203,43 @@ object ProfileManager {
         getRules()
     }
 
+    suspend fun mergeImportedRules(importedRules: List<RuleEntity>) {
+        if (importedRules.isEmpty()) {
+            DataStore.rulesFirstCreate = SagerDatabase.rulesDao.allRules().isNotEmpty()
+            return
+        }
+
+        val occupiedRuleNames = RouteRulePolicy.occupiedRuleNameKeys(
+            existingRules = SagerDatabase.rulesDao.allRules(),
+            reservedNames = RouteRulePolicy.reservedRuleNames(),
+        )
+
+        importedRules.forEach { importedRule ->
+            val normalizedName = RouteRulePolicy.normalizedRuleName(importedRule.name)
+            if (normalizedName.isNotEmpty() && normalizedName in occupiedRuleNames) {
+                return@forEach
+            }
+
+            createRule(
+                importedRule.copy(
+                    id = 0L,
+                    userOrder = 0L,
+                ),
+                post = false,
+            )
+
+            if (normalizedName.isNotEmpty()) {
+                occupiedRuleNames += normalizedName
+            }
+        }
+
+        val persistedRules = SagerDatabase.rulesDao.allRules()
+        val originalOrder = persistedRules.associate { it.id to it.userOrder }
+        val normalizedRules = RouteRulePolicy.normalizeUserRules(persistedRules)
+        if (normalizedRules.any { originalOrder[it.id] != it.userOrder }) {
+            SagerDatabase.rulesDao.updateRules(normalizedRules)
+        }
+        DataStore.rulesFirstCreate = normalizedRules.isNotEmpty()
+    }
+
 }

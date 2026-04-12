@@ -4,6 +4,7 @@ import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.RuleEntity
 import io.nekohasekai.sagernet.ktx.app
+import java.util.Locale
 
 data class RuntimeRouteRule(
     val stableId: Long? = null,
@@ -163,6 +164,30 @@ object RouteRulePolicy {
 
     fun normalizeUserRules(userRules: List<RuleEntity>): List<RuleEntity> {
         return rebuildUserRules(orderedUserRules(userRules))
+    }
+
+    fun normalizedRuleName(name: String): String {
+        return name.trim().lowercase(Locale.ROOT)
+    }
+
+    fun occupiedRuleNameKeys(
+        existingRules: List<RuleEntity>,
+        reservedNames: Collection<String> = emptyList(),
+    ): MutableSet<String> {
+        return buildSet {
+            existingRules.asSequence()
+                .map { normalizedRuleName(it.name) }
+                .filter { it.isNotEmpty() }
+                .forEach(::add)
+            reservedNames.asSequence()
+                .map(::normalizedRuleName)
+                .filter { it.isNotEmpty() }
+                .forEach(::add)
+        }.toMutableSet()
+    }
+
+    fun reservedRuleNames(): List<String> {
+        return systemRouteItems().map { it.name } + createDefaultUserRules().map { it.name }
     }
 
     fun resolveCustomInsertion(

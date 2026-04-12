@@ -167,4 +167,28 @@ class RouteRulePolicyTest {
 
         assertEquals(60_001L, newCustom.userOrder)
     }
+
+    @Test
+    fun normalizedRuleName_trimsAndIgnoresCase() {
+        assertEquals(
+            "block ads",
+            RouteRulePolicy.normalizedRuleName("  BlOcK AdS  ")
+        )
+    }
+
+    @Test
+    fun occupiedRuleNameKeys_mergesExistingAndReservedNames() {
+        val occupiedNames = RouteRulePolicy.occupiedRuleNameKeys(
+            existingRules = listOf(
+                RuleEntity(id = 1L, name = "  User Rule  "),
+                RuleEntity(id = 2L, name = "   "),
+            ),
+            reservedNames = listOf("Block Ads", "block quic"),
+        )
+
+        assertEquals(
+            setOf("user rule", "block ads", "block quic"),
+            occupiedNames
+        )
+    }
 }

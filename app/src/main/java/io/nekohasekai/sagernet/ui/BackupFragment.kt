@@ -262,7 +262,7 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
         }
     }
 
-    fun finishImport(
+    suspend fun finishImport(
         content: JSONObject, profile: Boolean, rule: Boolean, setting: Boolean
     ) {
         if (profile && content.has("profiles")) {
@@ -303,9 +303,7 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
                 rules.add(ParcelizeBridge.createRule(parcel))
                 parcel.recycle()
             }
-            SagerDatabase.rulesDao.reset()
-            SagerDatabase.rulesDao.insert(rules)
-            DataStore.rulesFirstCreate = true
+            ProfileManager.mergeImportedRules(rules)
         }
         if (setting && content.has("settings")) {
             val settings = mutableListOf<KeyValuePair>()

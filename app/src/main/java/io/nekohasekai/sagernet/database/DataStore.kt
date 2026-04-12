@@ -100,7 +100,7 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var serviceMode by configurationStore.string(Key.SERVICE_MODE) { Key.MODE_VPN }
 
     var trafficSniffing by configurationStore.stringToInt(Key.TRAFFIC_SNIFFING) { 1 }
-    var resolveDestination by configurationStore.boolean(Key.RESOLVE_DESTINATION)
+    var resolveDestination by configurationStore.boolean(Key.RESOLVE_DESTINATION) { false }
 
     var mtu by configurationStore.stringToInt(Key.MTU) { 9000 }
 
@@ -114,11 +114,14 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var globalCustomConfig by configurationStore.string(Key.GLOBAL_CUSTOM_CONFIG) { "" }
 
     var remoteDns by configurationStore.string(Key.REMOTE_DNS) { "https://dns.google/dns-query" }
-    var directDns by configurationStore.string(Key.DIRECT_DNS) { "https://223.5.5.5/dns-query" }
-    var enableDnsRouting by configurationStore.boolean(Key.ENABLE_DNS_ROUTING) { true }
-    var enableFakeDns by configurationStore.boolean(Key.ENABLE_FAKEDNS) { true }
+    var directDns by configurationStore.string(Key.DIRECT_DNS) { "https://common.dot.dns.yandex.net/dns-query" }
+    var domainStrategyForRemote by configurationStore.string(Key.DOMAIN_STRATEGY_FOR_REMOTE) { "ipv4_only" }
+    var domainStrategyForDirect by configurationStore.string(Key.DOMAIN_STRATEGY_FOR_DIRECT) { "ipv4_only" }
+    var domainStrategyForServer by configurationStore.string(Key.DOMAIN_STRATEGY_FOR_SERVER) { "ipv4_only" }
+    var enableDnsRouting by configurationStore.boolean(Key.ENABLE_DNS_ROUTING) { false }
+    var enableFakeDns by configurationStore.boolean(Key.ENABLE_FAKEDNS) { false }
 
-    var rulesProvider by configurationStore.stringToInt(Key.RULES_PROVIDER)
+    var rulesProvider by configurationStore.stringToInt(Key.RULES_PROVIDER) { 0 }
     var logLevel by configurationStore.stringToInt(Key.LOG_LEVEL)
     var logBufSize by configurationStore.int(Key.LOG_BUF_SIZE) { 0 }
     var acquireWakeLock by configurationStore.boolean(Key.ACQUIRE_WAKE_LOCK)
@@ -144,7 +147,7 @@ object DataStore : OnPreferenceDataStoreChangeListener {
         configurationStore.putString(key, "$value")
     }
 
-    var ipv6Mode by configurationStore.stringToInt(Key.IPV6_MODE) { IPv6Mode.DISABLE }
+    var ipv6Mode by configurationStore.stringToInt(Key.IPV6_MODE) { IPv6Mode.ENABLE }
 
     var meteredNetwork by configurationStore.boolean(Key.METERED_NETWORK)
     var proxyApps by configurationStore.boolean(Key.PROXY_APPS)

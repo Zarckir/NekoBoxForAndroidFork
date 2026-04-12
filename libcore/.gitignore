@@ -5,4 +5,5 @@ binary*.go
 /debug.go
 build
 .build
+gomobile
 env_*.sh

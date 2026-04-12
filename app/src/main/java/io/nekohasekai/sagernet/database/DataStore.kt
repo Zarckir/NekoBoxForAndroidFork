@@ -20,6 +20,7 @@ import io.nekohasekai.sagernet.ktx.string
 import io.nekohasekai.sagernet.ktx.stringToInt
 import io.nekohasekai.sagernet.ktx.stringToIntIfExists
 import moe.matsuri.nb4a.TempDatabase
+import io.nekohasekai.sagernet.utils.AppBypassPolicy
 
 object DataStore : OnPreferenceDataStoreChangeListener {
 
@@ -154,6 +155,48 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var bypass by configurationStore.boolean(Key.BYPASS_MODE) { true }
     var individual by configurationStore.string(Key.INDIVIDUAL)
     var showDirectSpeed by configurationStore.boolean(Key.SHOW_DIRECT_SPEED) { true }
+
+    fun appBypassBootstrapVersion(): Long? {
+        return configurationStore.getLong(Key.APP_BYPASS_BOOTSTRAP_VERSION)
+    }
+
+    fun hasStoredAppProxyState(): Boolean {
+        return configurationStore.getBoolean(Key.PROXY_APPS) != null ||
+            configurationStore.getBoolean(Key.BYPASS_MODE) != null ||
+            configurationStore.getString(Key.INDIVIDUAL) != null
+    }
+
+    fun bootstrapAppBypassDefaultsIfNeeded(
+        firstInstallTime: Long,
+        lastUpdateTime: Long,
+        installedPackages: Set<String>,
+        bypassPackages: Iterable<String>,
+    ): Boolean {
+        if (
+            !AppBypassPolicy.shouldBootstrapDefaults(
+                bootstrapVersion = appBypassBootstrapVersion(),
+                proxyApps = configurationStore.getBoolean(Key.PROXY_APPS),
+                bypass = configurationStore.getBoolean(Key.BYPASS_MODE),
+                individual = configurationStore.getString(Key.INDIVIDUAL),
+                firstInstallTime = firstInstallTime,
+                lastUpdateTime = lastUpdateTime,
+            )
+        ) {
+            return false
+        }
+
+        proxyApps = true
+        bypass = true
+        individual = AppBypassPolicy.matchingInstalledPackages(
+            installedPackages = installedPackages,
+            bypassPackages = bypassPackages,
+        ).joinToString("\n")
+        configurationStore.putLong(
+            Key.APP_BYPASS_BOOTSTRAP_VERSION,
+            AppBypassPolicy.BOOTSTRAP_VERSION,
+        )
+        return true
+    }
 
     val persistAcrossReboot by configurationStore.boolean(Key.PERSIST_ACROSS_REBOOT) { false }
 

@@ -24,6 +24,7 @@ import io.nekohasekai.sagernet.ktx.isOss
 import io.nekohasekai.sagernet.ktx.isPreview
 import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
 import io.nekohasekai.sagernet.ui.MainActivity
+import io.nekohasekai.sagernet.utils.AppBypassPolicy
 import io.nekohasekai.sagernet.utils.*
 import kotlinx.coroutines.DEBUG_PROPERTY_NAME
 import kotlinx.coroutines.DEBUG_PROPERTY_VALUE_ON
@@ -74,6 +75,13 @@ class SagerNet : Application(),
 
             runOnDefaultDispatcher {
                 PackageCache.register()
+                val packageInfo = packageManager.getPackageInfo(packageName, 0)
+                DataStore.bootstrapAppBypassDefaultsIfNeeded(
+                    firstInstallTime = packageInfo.firstInstallTime,
+                    lastUpdateTime = packageInfo.lastUpdateTime,
+                    installedPackages = PackageCache.installedPackages.keys,
+                    bypassPackages = AppBypassPolicy.readPackageNames(this@SagerNet),
+                )
                 cleanWebview()
             }
         }

@@ -31,6 +31,7 @@ object Key {
     const val PROXY_APPS = "proxyApps"
     const val BYPASS_MODE = "bypassMode"
     const val INDIVIDUAL = "individual"
+    const val APP_BYPASS_BOOTSTRAP_VERSION = "appBypassBootstrapVersion"
     const val METERED_NETWORK = "meteredNetwork"
 
     const val TRAFFIC_SNIFFING = "trafficSniffing"

@@ -38,6 +38,7 @@ import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.ktx.crossFadeFrom
 import io.nekohasekai.sagernet.ktx.onMainDispatcher
 import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
+import io.nekohasekai.sagernet.utils.AppBypassPolicy
 import io.nekohasekai.sagernet.utils.PackageCache
 import io.nekohasekai.sagernet.widget.ListListener
 import kotlinx.coroutines.Dispatchers
@@ -340,23 +341,18 @@ class AppManagerActivity : ThemedActivity() {
             .setPositiveButton(R.string.yes) { _, _ ->
                 try {
                     val needProxyAppsList = getAutoProxyApps("")
+                    val requiredBypassApps = getRequiredBypassApps()
                     val bypass = DataStore.bypass
                     proxiedUids.clear()
                     for (app in cachedApps) {
                         val needProxy =
                             needProxyAppsList.contains(app.key) || (app.value.applicationInfo?.uid
                                 ?: 0) == 1000
-                        if (needProxy) {
-                            if (!bypass) {
-                                app.value.applicationInfo?.apply {
-                                    proxiedUids[uid] = true
-                                }
-                            }
-                        } else {
-                            if (bypass) {
-                                app.value.applicationInfo?.apply {
-                                    proxiedUids[uid] = true
-                                }
+                        val shouldBypass = bypass && (!needProxy || requiredBypassApps.contains(app.key))
+                        val shouldProxy = !bypass && needProxy
+                        if (shouldBypass || shouldProxy) {
+                            app.value.applicationInfo?.apply {
+                                proxiedUids[uid] = true
                             }
                         }
                     }
@@ -386,6 +382,10 @@ class AppManagerActivity : ThemedActivity() {
         } catch (_: Exception) {
         }
         return list
+    }
+
+    private fun getRequiredBypassApps(): Set<String> {
+        return AppBypassPolicy.readPackageNames(app)
     }
 
     override fun supportNavigateUpTo(upIntent: Intent) =

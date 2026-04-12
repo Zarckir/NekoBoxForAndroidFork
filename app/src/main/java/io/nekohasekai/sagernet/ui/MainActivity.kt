@@ -57,6 +57,7 @@ class MainActivity : ThemedActivity(),
 
     lateinit var binding: LayoutMainBinding
     lateinit var navigation: NavigationView
+    private var connectionUiSnapshot = ConnectionUiSnapshot()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -91,10 +92,14 @@ class MainActivity : ThemedActivity(),
                 null
             )
         }
-        binding.stats.setOnClickListener { if (DataStore.serviceState.connected) binding.stats.testConnection() }
+        binding.stats.setOnClickListener {
+            if (connectionUiSnapshot.state.connected) {
+                runConnectionTest()
+            }
+        }
 
         setContentView(binding.root)
-        changeState(BaseService.State.Idle)
+        renderConnectionUi(connectionUiSnapshot, animate = false)
         connection.connect(this, this)
         DataStore.configurationStore.registerChangeListener(this)
         GroupManager.userInterface = GroupInterfaceAdapter(this)
@@ -314,18 +319,12 @@ class MainActivity : ThemedActivity(),
 
     @SuppressLint("CommitTransaction")
     fun displayFragment(fragment: ToolbarFragment) {
-        if (fragment is ConfigurationFragment) {
-            binding.stats.allowShow = true
-            binding.fab.show()
-        } else if (!DataStore.showBottomBar) {
-            binding.stats.allowShow = false
-            binding.stats.performHide()
-            binding.fab.hide()
-        }
+        updateChromeVisibility(fragment)
         supportFragmentManager.beginTransaction()
             .replace(R.id.fragment_holder, fragment)
             .commitAllowingStateLoss()
         binding.drawerLayout.closeDrawers()
+        renderConnectionUi(connectionUiSnapshot, animate = false)
     }
 
     fun displayFragmentWithId(@IdRes id: Int): Boolean {
@@ -357,16 +356,123 @@ class MainActivity : ThemedActivity(),
         return true
     }
 
-    private fun changeState(
+    private fun updateChromeVisibility(fragment: ToolbarFragment) {
+        val allowChrome = fragment is ConfigurationFragment || DataStore.showBottomBar
+        binding.stats.allowShow = allowChrome
+        if (allowChrome) {
+            binding.fab.show()
+        } else {
+            binding.fab.hide()
+        }
+    }
+
+    private fun renderConnectionUi(snapshot: ConnectionUiSnapshot, animate: Boolean) {
+        val previousSnapshot = connectionUiSnapshot
+        val renderedSnapshot = snapshot.copy(
+            statsVisible = snapshot.state.connected && binding.stats.allowShow
+        )
+        connectionUiSnapshot = renderedSnapshot
+        DataStore.serviceState = renderedSnapshot.state
+        binding.fab.changeState(renderedSnapshot.state, previousSnapshot.state, animate)
+        binding.stats.render(renderedSnapshot)
+    }
+
+    private fun applyServiceState(
         state: BaseService.State,
         msg: String? = null,
         animate: Boolean = false,
     ) {
-        DataStore.serviceState = state
-
-        binding.fab.changeState(state, DataStore.serviceState, animate)
-        binding.stats.changeState(state)
+        val previousSnapshot = connectionUiSnapshot
+        val clearStatus = previousSnapshot.state != state || !state.connected
+        renderConnectionUi(
+            previousSnapshot.copy(
+                state = state,
+                speed = if (state.connected) previousSnapshot.speed else SpeedDisplayData(),
+                statusText = if (clearStatus) null else previousSnapshot.statusText,
+                isConnectionTestInFlight = false,
+            ),
+            animate = animate,
+        )
         if (msg != null) snackbar(getString(R.string.vpn_error, msg)).show()
+    }
+
+    private fun resyncConnectionUi(service: ISagerNetService?, animate: Boolean = false) {
+        val state = service?.let {
+            try {
+                BaseService.State.values()[it.state]
+            } catch (_: RemoteException) {
+                connectionUiSnapshot.state
+            }
+        } ?: connectionUiSnapshot.state
+        applyServiceState(state, animate = animate)
+    }
+
+    private fun runConnectionTest() {
+        renderConnectionUi(
+            connectionUiSnapshot.copy(
+                statusText = getString(R.string.connection_test_testing),
+                isConnectionTestInFlight = true,
+            ),
+            animate = false,
+        )
+        runOnDefaultDispatcher {
+            try {
+                val elapsed = urlTest()
+                onMainDispatcher {
+                    if (!connectionUiSnapshot.state.connected) {
+                        renderConnectionUi(
+                            connectionUiSnapshot.copy(
+                                statusText = null,
+                                isConnectionTestInFlight = false,
+                            ),
+                            animate = false,
+                        )
+                        return@onMainDispatcher
+                    }
+                    val statusText = getString(
+                        if (DataStore.connectionTestURL.startsWith("https://")) {
+                            R.string.connection_test_available
+                        } else {
+                            R.string.connection_test_available_http
+                        },
+                        elapsed
+                    )
+                    renderConnectionUi(
+                        connectionUiSnapshot.copy(
+                            statusText = statusText,
+                            isConnectionTestInFlight = false,
+                        ),
+                        animate = false,
+                    )
+                }
+            } catch (e: Exception) {
+                onMainDispatcher {
+                    if (!connectionUiSnapshot.state.connected) {
+                        renderConnectionUi(
+                            connectionUiSnapshot.copy(
+                                statusText = null,
+                                isConnectionTestInFlight = false,
+                            ),
+                            animate = false,
+                        )
+                        return@onMainDispatcher
+                    }
+                    renderConnectionUi(
+                        connectionUiSnapshot.copy(
+                            statusText = null,
+                            isConnectionTestInFlight = false,
+                        ),
+                        animate = false,
+                    )
+                    snackbar(
+                        getString(
+                            R.string.connection_test_error,
+                            e.readableMessage
+                        )
+                    ).show()
+                }
+            }
+        }
     }
 
     override fun snackbarInternal(text: CharSequence): Snackbar {
@@ -379,19 +485,15 @@ class MainActivity : ThemedActivity(),
     }
 
     override fun stateChanged(state: BaseService.State, profileName: String?, msg: String?) {
-        changeState(state, msg, true)
+        applyServiceState(state, msg, true)
     }
 
     val connection = SagerConnection(SagerConnection.CONNECTION_ID_MAIN_ACTIVITY_FOREGROUND, true)
-    override fun onServiceConnected(service: ISagerNetService) = changeState(
-        try {
-            BaseService.State.values()[service.state]
-        } catch (_: RemoteException) {
-            BaseService.State.Idle
-        }
-    )
+    override fun onServiceConnected(service: ISagerNetService) {
+        resyncConnectionUi(service)
+    }
 
-    override fun onServiceDisconnected() = changeState(BaseService.State.Idle)
+    override fun onServiceDisconnected() = renderConnectionUi(connectionUiSnapshot, animate = false)
     override fun onBinderDied() {
         connection.disconnect(this)
         connection.connect(this, this)
@@ -404,7 +506,10 @@ class MainActivity : ThemedActivity(),
     // may NOT called when app is in background
     // ONLY do UI update here, write DB in bg process
     override fun cbSpeedUpdate(stats: SpeedDisplayData) {
-        binding.stats.updateSpeed(stats.txRateProxy, stats.rxRateProxy)
+        renderConnectionUi(
+            connectionUiSnapshot.copy(speed = stats.copy()),
+            animate = false,
+        )
     }
 
     override fun cbTrafficUpdate(data: TrafficData) {
@@ -437,8 +542,8 @@ class MainActivity : ThemedActivity(),
     }
 
     override fun onStart() {
-        connection.updateConnectionId(SagerConnection.CONNECTION_ID_MAIN_ACTIVITY_FOREGROUND)
         super.onStart()
+        connection.updateConnectionId(SagerConnection.CONNECTION_ID_MAIN_ACTIVITY_FOREGROUND)
     }
 
     override fun onStop() {

@@ -189,7 +189,8 @@ class VpnService : BaseVpnService(),
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && DataStore.appendHttpProxy) {
-            builder.setHttpProxy(ProxyInfo.buildDirectProxy(LOCALHOST, DataStore.mixedPort))
+            val localProxyPort = LocalProxyManager.currentSession()?.port ?: DataStore.mixedPort
+            builder.setHttpProxy(ProxyInfo.buildDirectProxy(LOCALHOST, localProxyPort))
         }
 
         metered = DataStore.meteredNetwork

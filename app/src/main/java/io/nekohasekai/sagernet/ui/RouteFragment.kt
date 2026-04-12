@@ -11,17 +11,37 @@ import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import io.nekohasekai.sagernet.R
-import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.RuleEntity
 import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.databinding.LayoutEmptyRouteBinding
 import io.nekohasekai.sagernet.databinding.LayoutRouteItemBinding
-import io.nekohasekai.sagernet.ktx.*
+import io.nekohasekai.sagernet.ktx.FixedLinearLayoutManager
+import io.nekohasekai.sagernet.ktx.launchCustomTab
+import io.nekohasekai.sagernet.ktx.needReload
+import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
+import io.nekohasekai.sagernet.route.RouteRulePolicy
+import io.nekohasekai.sagernet.route.SystemRouteRuleItem
 import io.nekohasekai.sagernet.widget.ListListener
 import io.nekohasekai.sagernet.widget.UndoSnackbarManager
 
 class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItemClickListener {
+
+    sealed interface RouteRow {
+        val stableId: Long
+
+        data object Document : RouteRow {
+            override val stableId = 0L
+        }
+
+        data class System(val item: SystemRouteRuleItem) : RouteRow {
+            override val stableId = item.stableId
+        }
+
+        data class User(val rule: RuleEntity) : RouteRow {
+            override val stableId = rule.id
+        }
+    }
 
     lateinit var activity: MainActivity
     lateinit var ruleListView: RecyclerView
@@ -45,41 +65,53 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
         ruleListView.adapter = ruleAdapter
         undoManager = UndoSnackbarManager(activity, ruleAdapter)
 
-        ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(ItemTouchHelper.UP or ItemTouchHelper.DOWN, ItemTouchHelper.START) {
+        ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(
+            ItemTouchHelper.UP or ItemTouchHelper.DOWN,
+            ItemTouchHelper.START
+        ) {
 
             override fun getSwipeDirs(
                 recyclerView: RecyclerView,
                 viewHolder: RecyclerView.ViewHolder,
-            ) = if (viewHolder is RuleAdapter.DocumentHolder) {
-                0
-            } else {
-                super.getSwipeDirs(recyclerView, viewHolder)
+            ): Int {
+                return if (ruleAdapter.isMovableUserPosition(viewHolder.bindingAdapterPosition)) {
+                    super.getSwipeDirs(recyclerView, viewHolder)
+                } else {
+                    0
+                }
             }
 
             override fun getDragDirs(
                 recyclerView: RecyclerView,
                 viewHolder: RecyclerView.ViewHolder,
-            ) = if (viewHolder is RuleAdapter.DocumentHolder) {
-                0
-            } else {
-                super.getDragDirs(recyclerView, viewHolder)
+            ): Int {
+                return if (ruleAdapter.isMovableUserPosition(viewHolder.bindingAdapterPosition)) {
+                    super.getDragDirs(recyclerView, viewHolder)
+                } else {
+                    0
+                }
             }
 
             override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
+                val holder = viewHolder as? RuleAdapter.RuleHolder ?: return
+                val rule = holder.userRule ?: return
                 val index = viewHolder.bindingAdapterPosition
                 ruleAdapter.remove(index)
-                undoManager.remove(index to (viewHolder as RuleAdapter.RuleHolder).rule)
+                undoManager.remove(index to rule)
             }
 
             override fun onMove(
                 recyclerView: RecyclerView,
-                viewHolder: RecyclerView.ViewHolder, target: RecyclerView.ViewHolder,
+                viewHolder: RecyclerView.ViewHolder,
+                target: RecyclerView.ViewHolder,
             ): Boolean {
-                return if (target is RuleAdapter.DocumentHolder) {
-                    false
-                } else {
-                    ruleAdapter.move(viewHolder.bindingAdapterPosition, target.bindingAdapterPosition)
+                val from = viewHolder.bindingAdapterPosition
+                val to = target.bindingAdapterPosition
+                return if (ruleAdapter.isMovableUserPosition(from) && ruleAdapter.isDropTargetPosition(to)) {
+                    ruleAdapter.move(from, to)
                     true
+                } else {
+                    false
                 }
             }
 
@@ -105,19 +137,20 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
             R.id.action_new_route -> {
                 startActivity(Intent(context, RouteSettingsActivity::class.java))
             }
+
             R.id.action_reset_route -> {
                 MaterialAlertDialogBuilder(activity).setTitle(R.string.confirm)
                     .setMessage(R.string.clear_profiles_message)
                     .setPositiveButton(R.string.yes) { _, _ ->
                         runOnDefaultDispatcher {
-                            SagerDatabase.rulesDao.reset()
-                            DataStore.rulesFirstCreate = false
+                            ProfileManager.resetRulesToDefaults()
                             ruleAdapter.reload()
                         }
                     }
                     .setNegativeButton(R.string.no, null)
                     .show()
             }
+
             R.id.action_manage_assets -> {
                 startActivity(Intent(requireContext(), AssetsActivity::class.java))
             }
@@ -125,22 +158,37 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
         return true
     }
 
-    inner class RuleAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>(), ProfileManager.RuleListener, UndoSnackbarManager.Interface<RuleEntity> {
+    inner class RuleAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>(),
+        ProfileManager.RuleListener,
+        UndoSnackbarManager.Interface<RuleEntity> {
 
-        val ruleList = ArrayList<RuleEntity>()
-        suspend fun reload() {
-            val rules = ProfileManager.getRules()
-            ruleListView.post {
-                ruleList.clear()
-                ruleList.addAll(rules)
-                ruleAdapter.notifyDataSetChanged()
-            }
-        }
+        private val systemRules = RouteRulePolicy.systemRouteItems()
+        private val userRules = ArrayList<RuleEntity>()
+        private val updated = LinkedHashMap<Long, RuleEntity>()
 
         init {
+            setHasStableIds(true)
             runOnDefaultDispatcher {
                 reload()
             }
+        }
+
+        suspend fun reload() {
+            val rules = ProfileManager.getRules()
+            ruleListView.post {
+                userRules.clear()
+                userRules.addAll(rules)
+                notifyDataSetChanged()
+            }
+        }
+
+        fun isMovableUserPosition(position: Int): Boolean {
+            val row = rowAt(position) as? RouteRow.User ?: return false
+            return !RouteRulePolicy.isPinnedUserRule(row.rule)
+        }
+
+        fun isDropTargetPosition(position: Int): Boolean {
+            return rowAt(position) != RouteRow.Document
         }
 
         override fun onCreateViewHolder(
@@ -155,63 +203,58 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
         }
 
         override fun getItemViewType(position: Int): Int {
-            if (position == 0) return 0
-            return 1
+            return if (position == 0) 0 else 1
         }
 
         override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
-            if (holder is DocumentHolder) {
-                holder.bind()
-            } else if (holder is RuleHolder) {
-                holder.bind(ruleList[position - 1])
+            when (val row = rowAt(position)) {
+                RouteRow.Document -> (holder as DocumentHolder).bind()
+                is RouteRow.System -> (holder as RuleHolder).bind(row)
+                is RouteRow.User -> (holder as RuleHolder).bind(row)
             }
         }
 
         override fun getItemCount(): Int {
-            return ruleList.size + 1
+            return displayRows().size
         }
 
         override fun getItemId(position: Int): Long {
-            if (position == 0) return 0L
-            return ruleList[position - 1].id
+            return rowAt(position).stableId
         }
 
-        private val updated = HashSet<RuleEntity>()
         fun move(from: Int, to: Int) {
-            val first = ruleList[from - 1]
-            var previousOrder = first.userOrder
-            val (step, range) = if (from < to) Pair(1, from - 1 until to - 1) else Pair(-1, to downTo from - 1)
-            for (i in range) {
-                val next = ruleList[i + step]
-                val order = next.userOrder
-                next.userOrder = previousOrder
-                previousOrder = order
-                ruleList[i] = next
-                updated.add(next)
+            val movingRule = (rowAt(from) as? RouteRow.User)?.rule ?: return
+            if (RouteRulePolicy.isPinnedUserRule(movingRule)) {
+                return
             }
-            first.userOrder = previousOrder
-            ruleList[to - 1] = first
-            updated.add(first)
-            notifyItemMoved(from, to)
+            val ordered = RouteRulePolicy.orderedUserRules(userRules.filter { it.id != movingRule.id })
+            val insertion = RouteRulePolicy.resolveCustomInsertion(
+                ordered = ordered,
+                insertionPosition = resolveInsertionPosition(from, to),
+                systemRuleCount = systemRules.size,
+            )
+            applyUserRules(RouteRulePolicy.insertCustomRule(ordered, movingRule, insertion))
         }
 
         fun commitMove() = runOnDefaultDispatcher {
             if (updated.isNotEmpty()) {
-                SagerDatabase.rulesDao.updateRules(updated.toList())
+                SagerDatabase.rulesDao.updateRules(updated.values.toList())
                 updated.clear()
                 needReload()
             }
         }
 
-        fun remove(index: Int) {
-            ruleList.removeAt(index - 1)
-            notifyItemRemoved(index)
+        fun remove(adapterPosition: Int) {
+            val rule = (rowAt(adapterPosition) as? RouteRow.User)?.rule ?: return
+            val index = userRules.indexOfFirst { it.id == rule.id }
+            if (index == -1) return
+            userRules.removeAt(index)
+            notifyDataSetChanged()
         }
 
         override fun undo(actions: List<Pair<Int, RuleEntity>>) {
-            for ((index, item) in actions) {
-                ruleList.add(index - 1, item)
-                notifyItemInserted(index)
+            actions.sortedBy { it.first }.forEach { (adapterPosition, item) ->
+                restoreCustomRule(adapterPosition, item)
             }
         }
 
@@ -223,45 +266,68 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
         }
 
         override suspend fun onAdd(rule: RuleEntity) {
-            ruleListView.post {
-                ruleList.add(rule)
-                ruleAdapter.notifyItemInserted(ruleList.size)
-                needReload()
-            }
+            reload()
         }
 
         override suspend fun onUpdated(rule: RuleEntity) {
-            val index = ruleList.indexOfFirst { it.id == rule.id }
-            if (index == -1) return
-            ruleListView.post {
-                ruleList[index] = rule
-                ruleAdapter.notifyItemChanged(index + 1)
-                needReload()
-            }
+            reload()
         }
 
         override suspend fun onRemoved(ruleId: Long) {
-            val index = ruleList.indexOfFirst { it.id == ruleId }
-            if (index == -1) {
-                onMainDispatcher {
-                    needReload()
-                }
-            } else ruleListView.post {
-                ruleList.removeAt(index)
-                ruleAdapter.notifyItemRemoved(index + 1)
-                needReload()
-            }
+            reload()
         }
 
         override suspend fun onCleared() {
-            ruleListView.post {
-                ruleList.clear()
-                ruleAdapter.notifyDataSetChanged()
-                needReload()
+            reload()
+        }
+
+        private fun rowAt(position: Int): RouteRow {
+            return displayRows()[position]
+        }
+
+        private fun displayRows(): List<RouteRow> {
+            val ordered = RouteRulePolicy.orderedUserRules(userRules)
+            return buildList {
+                add(RouteRow.Document)
+                addAll(ordered.customBeforeAds.map { RouteRow.User(it) })
+                addAll(ordered.adsRules.map { RouteRow.User(it) })
+                addAll(ordered.customBetweenAdsAndRu.map { RouteRow.User(it) })
+                addAll(systemRules.map { RouteRow.System(it) })
+                addAll(ordered.customBetweenRuAndQuic.map { RouteRow.User(it) })
+                addAll(ordered.quicRules.map { RouteRow.User(it) })
+                addAll(ordered.customAfterQuic.map { RouteRow.User(it) })
             }
         }
 
-        inner class DocumentHolder(binding: LayoutEmptyRouteBinding) : RecyclerView.ViewHolder(binding.root) {
+        private fun restoreCustomRule(adapterPosition: Int, item: RuleEntity) {
+            val ordered = RouteRulePolicy.orderedUserRules(userRules)
+            val insertion = RouteRulePolicy.resolveCustomInsertion(
+                ordered = ordered,
+                insertionPosition = adapterPosition.coerceIn(1, displayRows().size),
+                systemRuleCount = systemRules.size,
+            )
+            applyUserRules(RouteRulePolicy.insertCustomRule(ordered, item, insertion))
+        }
+
+        private fun applyUserRules(orderedRules: List<RuleEntity>) {
+            orderedRules.forEach { rule ->
+                updated[rule.id] = rule
+            }
+            userRules.clear()
+            userRules.addAll(orderedRules)
+            notifyDataSetChanged()
+        }
+
+        private fun resolveInsertionPosition(from: Int, to: Int): Int {
+            var insertionPosition = if (to > from) to + 1 else to
+            if (from < insertionPosition) {
+                insertionPosition -= 1
+            }
+            return insertionPosition.coerceIn(1, displayRows().size)
+        }
+
+        inner class DocumentHolder(binding: LayoutEmptyRouteBinding) :
+            RecyclerView.ViewHolder(binding.root) {
             fun bind() {
                 itemView.setOnClickListener {
                     it.context.launchCustomTab("https://matsuridayo.github.io/nb4a-route/")
@@ -269,32 +335,56 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
             }
         }
 
-        inner class RuleHolder(binding: LayoutRouteItemBinding) : RecyclerView.ViewHolder(binding.root) {
+        inner class RuleHolder(binding: LayoutRouteItemBinding) :
+            RecyclerView.ViewHolder(binding.root) {
 
-            lateinit var rule: RuleEntity
-            val profileName = binding.profileName
-            val profileType = binding.profileType
-            val routeOutbound = binding.routeOutbound
-            val editButton = binding.edit
-            val shareLayout = binding.share
-            val enableSwitch = binding.enable
+            var userRule: RuleEntity? = null
+            private val profileName = binding.profileName
+            private val profileType = binding.profileType
+            private val routeOutbound = binding.routeOutbound
+            private val editButton = binding.edit
+            private val shareLayout = binding.share
+            private val enableSwitch = binding.enable
 
-            fun bind(ruleEntity: RuleEntity) {
-                rule = ruleEntity
+            fun bind(row: RouteRow) {
+                when (row) {
+                    is RouteRow.System -> bindSystem(row.item)
+                    is RouteRow.User -> bindUser(row.rule)
+                    RouteRow.Document -> error("Document row cannot be bound by RuleHolder")
+                }
+            }
+
+            private fun bindSystem(item: SystemRouteRuleItem) {
+                userRule = null
+                profileName.text = item.name
+                profileType.text = item.summary
+                routeOutbound.text = item.outboundLabel
+                itemView.setOnClickListener(null)
+                editButton.visibility = View.INVISIBLE
+                shareLayout.visibility = View.GONE
+                enableSwitch.setOnCheckedChangeListener(null)
+                enableSwitch.isChecked = true
+                enableSwitch.isEnabled = false
+            }
+
+            private fun bindUser(rule: RuleEntity) {
+                userRule = rule
                 profileName.text = rule.displayName()
                 profileType.text = rule.mkSummary()
                 routeOutbound.text = rule.displayOutbound()
+                editButton.visibility = View.VISIBLE
+                shareLayout.visibility = View.GONE
+                enableSwitch.setOnCheckedChangeListener(null)
+                enableSwitch.isEnabled = true
+                enableSwitch.isChecked = rule.enabled
                 itemView.setOnClickListener {
                     enableSwitch.performClick()
                 }
-                enableSwitch.isChecked = rule.enabled
                 enableSwitch.setOnCheckedChangeListener { _, isChecked ->
                     runOnDefaultDispatcher {
                         rule.enabled = isChecked
-                        SagerDatabase.rulesDao.updateRule(rule)
-                        onMainDispatcher {
-                            needReload()
-                        }
+                        ProfileManager.updateRule(rule)
+                        needReload()
                     }
                 }
                 editButton.setOnClickListener {
@@ -304,7 +394,5 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
                 }
             }
         }
-
     }
-
 }

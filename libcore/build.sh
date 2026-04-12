@@ -1,6 +1,8 @@
 #!/bin/bash
 
-source ./env_java.sh || true
+if [ -f ./env_java.sh ]; then
+  source ./env_java.sh
+fi
 source ../buildScript/init/env_ndk.sh
 
 BUILD=".build"
@@ -14,8 +16,11 @@ if [ -z "$GOPATH" ]; then
   GOPATH=$(go env GOPATH)
 fi
 
-export GOBIND=gobind-matsuri
-"$GOPATH"/bin/gomobile-matsuri bind -v -androidapi 21 -cache "$(realpath $BUILD)" -trimpath -ldflags='-s -w' -tags='with_conntrack,with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api' . || exit 1
+mkdir -p "$BUILD"
+CACHE_DIR=$(cd "$BUILD" && pwd)
+
+export GOBIND="$GOPATH/bin/gobind-matsuri"
+"$GOPATH"/bin/gomobile-matsuri bind -v -androidapi 21 -cache "$CACHE_DIR" -trimpath -ldflags='-s -w' -tags='with_conntrack,with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api' . || exit 1
 rm -r libcore-sources.jar
 
 proj=../app/libs

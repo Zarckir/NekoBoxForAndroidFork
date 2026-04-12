@@ -12,6 +12,8 @@ import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.aidl.ISagerNetService
 import io.nekohasekai.sagernet.aidl.ISagerNetServiceCallback
+import io.nekohasekai.sagernet.aidl.SpeedDisplayData
+import io.nekohasekai.sagernet.aidl.TrafficData
 import io.nekohasekai.sagernet.bg.proto.ProxyInstance
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.SagerDatabase
@@ -80,12 +82,44 @@ class BaseService {
 
         val binder = Binder(this)
         var connectingJob: Job? = null
+        private val snapshotLock = Any()
+        private var lastSpeedSnapshot = SpeedDisplayData()
+        private val lastTrafficSnapshots = LinkedHashMap<Long, TrafficData>()
 
         fun changeState(s: State, msg: String? = null) {
             if (state == s && msg == null) return
+            if (!s.connected) {
+                clearTrafficSnapshot()
+            }
             state = s
             DataStore.serviceState = s
             binder.stateChanged(s, msg)
+        }
+
+        fun updateTrafficSnapshot(
+            speed: SpeedDisplayData,
+            traffic: Map<Long, TrafficData> = emptyMap(),
+        ) {
+            synchronized(snapshotLock) {
+                lastSpeedSnapshot = speed.copy()
+                lastTrafficSnapshots.clear()
+                traffic.toSortedMap().forEach { (id, item) ->
+                    lastTrafficSnapshots[id] = item.copy()
+                }
+            }
+        }
+
+        fun currentTrafficSnapshot(): Pair<SpeedDisplayData, List<TrafficData>> {
+            return synchronized(snapshotLock) {
+                lastSpeedSnapshot.copy() to lastTrafficSnapshots.values.map { it.copy() }
+            }
+        }
+
+        private fun clearTrafficSnapshot() {
+            synchronized(snapshotLock) {
+                lastSpeedSnapshot = SpeedDisplayData()
+                lastTrafficSnapshots.clear()
+            }
         }
     }
 
@@ -113,6 +147,7 @@ class BaseService {
                 callbacks.register(cb)
             }
             callbackIdMap[cb] = id
+            pushSnapshot(cb, id)
         }
 
         private val broadcastMutex = Mutex()
@@ -137,6 +172,23 @@ class BaseService {
         override fun unregisterCallback(cb: ISagerNetServiceCallback) {
             callbackIdMap.remove(cb)
             callbacks.unregister(cb)
+        }
+
+        private fun pushSnapshot(cb: ISagerNetServiceCallback, id: Int) {
+            val data = data ?: return
+            runCatching {
+                cb.stateChanged(data.state.ordinal, profileName, null)
+            }
+            if (id != SagerConnection.CONNECTION_ID_MAIN_ACTIVITY_FOREGROUND) return
+            val (speed, traffic) = data.currentTrafficSnapshot()
+            runCatching {
+                cb.cbSpeedUpdate(speed)
+            }
+            traffic.forEach { item ->
+                runCatching {
+                    cb.cbTrafficUpdate(item)
+                }
+            }
         }
 
         override fun urlTest(): Int {
@@ -223,6 +275,7 @@ class BaseService {
 
         fun killProcesses() {
             data.proxy?.close()
+            LocalProxyManager.clear()
             wakeLock?.apply {
                 release()
                 wakeLock = null
@@ -362,6 +415,7 @@ class BaseService {
 
                     Executable.killAll()    // clean up old processes
                     preInit()
+                    LocalProxyManager.rotateSession()
                     proxy.init()
                     DataStore.currentProfile = profile.id
 

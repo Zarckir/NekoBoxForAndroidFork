@@ -1,5 +1,14 @@
 # NekoBox for Android
 
+This fork builds as `zarckir-nekobox` (`moe.zarckir.nekobox`).
+
+Fork-specific behavior:
+
+* local loopback `mixed` proxy uses a per-session random port and random username/password instead of an anonymous fixed local port
+* Russia routing policy is built in and always bypasses `geosite:category-ru`, `geoip:ru`, and `ru,рф,su,xn--p1ai`
+* route anchors are fixed as `Block Ads -> Russia -> Block QUIC`, while custom rules can be moved around those anchors and keep the same runtime priority as shown in the UI
+* release APK outputs use the `zarckir-nekobox-*` naming scheme
+
 [![API](https://img.shields.io/badge/API-21%2B-brightgreen.svg?style=flat)](https://android-arsenal.com/api?level=21)
 [![Releases](https://img.shields.io/github/v/release/MatsuriDayo/NekoBoxForAndroid)](https://github.com/MatsuriDayo/NekoBoxForAndroid/releases)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-orange.svg)](https://www.gnu.org/licenses/gpl-3.0)

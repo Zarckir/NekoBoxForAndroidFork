@@ -305,6 +305,7 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
             }
             SagerDatabase.rulesDao.reset()
             SagerDatabase.rulesDao.insert(rules)
+            DataStore.rulesFirstCreate = true
         }
         if (setting && content.has("settings")) {
             val settings = mutableListOf<KeyValuePair>()

@@ -157,6 +157,14 @@ class TrafficLooper
                 mainTx,
                 mainRx
             )
+            val trafficSnapshot = if (profileTrafficStatistics) {
+                idMap.mapValues { (id, item) ->
+                    TrafficData(id = id, rx = item.rx, tx = item.tx)
+                }
+            } else {
+                emptyMap()
+            }
+            data.updateTrafficSnapshot(speed, trafficSnapshot)
 
             // broadcast (MainActivity)
             if (data.state == BaseService.State.Connected
@@ -166,10 +174,8 @@ class TrafficLooper
                     if (data.binder.callbackIdMap[b] == SagerConnection.CONNECTION_ID_MAIN_ACTIVITY_FOREGROUND) {
                         b.cbSpeedUpdate(speed)
                         if (profileTrafficStatistics) {
-                            idMap.forEach { (id, item) ->
-                                b.cbTrafficUpdate(
-                                    TrafficData(id = id, rx = item.rx, tx = item.tx) // display
-                                )
+                            trafficSnapshot.values.forEach { item ->
+                                b.cbTrafficUpdate(item)
                             }
                         }
                     }

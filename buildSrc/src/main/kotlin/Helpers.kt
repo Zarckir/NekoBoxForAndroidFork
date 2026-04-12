@@ -115,15 +115,23 @@ fun Project.setupAppCommon() {
     setupCommon()
 
     val lp = requireLocalProperties()
-    val keystorePwd = lp.getProperty("KEYSTORE_PASS") ?: System.getenv("KEYSTORE_PASS")
-    val alias = lp.getProperty("ALIAS_NAME") ?: System.getenv("ALIAS_NAME")
-    val pwd = lp.getProperty("ALIAS_PASS") ?: System.getenv("ALIAS_PASS")
+    fun localOrGradleOrEnv(name: String): String? {
+        return lp.getProperty(name)
+            ?: (findProperty(name) as? String)
+            ?: System.getenv(name)
+    }
+
+    val keystoreFile = localOrGradleOrEnv("KEYSTORE_FILE")?.let { rootProject.file(it) }
+        ?: rootProject.file("release.keystore").takeIf { it.exists() }
+    val keystorePwd = localOrGradleOrEnv("KEYSTORE_PASS")
+    val alias = localOrGradleOrEnv("ALIAS_NAME")
+    val pwd = localOrGradleOrEnv("ALIAS_PASS")
 
     android.apply {
-        if (keystorePwd != null) {
+        if (keystoreFile != null && keystorePwd != null && alias != null && pwd != null) {
             signingConfigs {
                 create("release") {
-                    storeFile = rootProject.file("release.keystore")
+                    storeFile = keystoreFile
                     storePassword = keystorePwd
                     keyAlias = alias
                     keyPassword = pwd
@@ -197,10 +205,10 @@ fun Project.setupApp() {
                 outputFileName = if (isPreview) {
                     outputFileName.replace(
                         project.name,
-                        "NekoBox-" + requireMetadata().getProperty("PRE_VERSION_NAME")
+                        "zarckir-nekobox-" + requireMetadata().getProperty("PRE_VERSION_NAME")
                     ).replace("-preview", "")
                 } else {
-                    outputFileName.replace(project.name, "NekoBox-$versionName")
+                    outputFileName.replace(project.name, "zarckir-nekobox-$versionName")
                         .replace("-release", "")
                         .replace("-oss", "")
                 }

@@ -32,6 +32,7 @@ import moe.matsuri.nb4a.plugin.Plugins
 import androidx.core.net.toUri
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import io.nekohasekai.sagernet.SagerNet
+import io.nekohasekai.sagernet.bg.LocalProxyManager
 import io.nekohasekai.sagernet.database.DataStore
 import moe.matsuri.nb4a.utils.Util
 import org.json.JSONObject
@@ -216,7 +217,9 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
                 try {
                     val client = Libcore.newHttpClient().apply {
                         modernTLS()
-                        trySocks5(DataStore.mixedPort)
+                        LocalProxyManager.currentSession()?.let {
+                            trySocks5WithAuth(it.port, it.username, it.password)
+                        }
                     }
                     val response = client.newRequest().apply {
                         if (checkPreview) {

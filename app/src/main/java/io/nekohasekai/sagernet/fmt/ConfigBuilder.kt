@@ -2,6 +2,7 @@ package io.nekohasekai.sagernet.fmt
 
 import android.widget.Toast
 import io.nekohasekai.sagernet.*
+import io.nekohasekai.sagernet.bg.LocalProxyManager
 import io.nekohasekai.sagernet.bg.VpnService
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProxyEntity
@@ -25,6 +26,7 @@ import io.nekohasekai.sagernet.fmt.wireguard.WireGuardBean
 import io.nekohasekai.sagernet.fmt.wireguard.buildSingBoxOutboundWireguardBean
 import io.nekohasekai.sagernet.ktx.isIpAddress
 import io.nekohasekai.sagernet.ktx.mkPort
+import io.nekohasekai.sagernet.route.RouteRulePolicy
 import io.nekohasekai.sagernet.utils.PackageCache
 import moe.matsuri.nb4a.*
 import moe.matsuri.nb4a.SingBoxOptions.*
@@ -123,7 +125,11 @@ fun buildConfig(
         return list
     }
 
-    val extraRules = if (forTest) listOf() else SagerDatabase.rulesDao.enabledRules()
+    val extraRules = if (forTest) {
+        listOf()
+    } else {
+        RouteRulePolicy.runtimeRules(SagerDatabase.rulesDao.enabledRules())
+    }
     val extraProxies =
         if (forTest) mapOf() else SagerDatabase.proxyDao.getEntities(extraRules.mapNotNull { rule ->
             rule.outbound.takeIf { it > 0 && it != proxy.id }
@@ -144,6 +150,7 @@ fun buildConfig(
     val needSniffOverride = DataStore.trafficSniffing == 2
     val externalIndexMap = ArrayList<IndexEntity>()
     val ipv6Mode = if (forTest) IPv6Mode.ENABLE else DataStore.ipv6Mode
+    val localProxySession = if (forTest || forExport) null else LocalProxyManager.currentSession()
 
     fun genDomainStrategy(noAsIs: Boolean): String {
         return when {
@@ -228,10 +235,16 @@ fun buildConfig(
                 type = "mixed"
                 tag = TAG_MIXED
                 listen = bind
-                listen_port = DataStore.mixedPort
+                listen_port = localProxySession?.port ?: DataStore.mixedPort
                 domain_strategy = genDomainStrategy(DataStore.resolveDestination)
                 sniff = needSniff
                 sniff_override_destination = needSniffOverride
+                localProxySession?.let {
+                    users = listOf(User().apply {
+                        username = it.username
+                        password = it.password
+                    })
+                }
             })
         }
 
@@ -488,7 +501,7 @@ fun buildConfig(
                 if (!isVPN) {
                     Toast.makeText(
                         SagerNet.application,
-                        SagerNet.application.getString(R.string.route_need_vpn, rule.displayName()),
+                        SagerNet.application.getString(R.string.route_need_vpn, rule.name),
                         Toast.LENGTH_SHORT
                     ).show()
                 }
@@ -588,7 +601,7 @@ fun buildConfig(
                 if (ruleObj.outbound.isNullOrBlank()) {
                     Toast.makeText(
                         SagerNet.application,
-                        "Warning: " + rule.displayName() + ": A non-existent outbound was specified.",
+                        "Warning: " + rule.name + ": A non-existent outbound was specified.",
                         Toast.LENGTH_LONG
                     ).show()
                 } else {

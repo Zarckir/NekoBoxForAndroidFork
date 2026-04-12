@@ -1,6 +1,8 @@
 #!/bin/bash
 
-chmod -R 777 .build 2>/dev/null
+set -e
+
+chmod -R 777 .build 2>/dev/null || true
 rm -rf .build 2>/dev/null
 
 if [ -z "$GOPATH" ]; then
@@ -9,20 +11,16 @@ fi
 
 # Install gomobile
 if [ ! -f "$GOPATH/bin/gomobile-matsuri" ]; then
+    rm -rf gomobile
     git clone https://github.com/MatsuriDayo/gomobile.git
     pushd gomobile
 	git checkout origin/master2
-    pushd cmd
-    pushd gomobile
-    go install -v
-    popd
-    pushd gobind
-    go install -v
-    popd
+    go install -v ./cmd/gomobile
+    go install -v ./cmd/gobind
     popd
     rm -rf gomobile
     mv "$GOPATH/bin/gomobile" "$GOPATH/bin/gomobile-matsuri"
     mv "$GOPATH/bin/gobind" "$GOPATH/bin/gobind-matsuri"
 fi
 
-GOBIND=gobind-matsuri gomobile-matsuri init
+GOBIND="$GOPATH/bin/gobind-matsuri" "$GOPATH/bin/gomobile-matsuri" init

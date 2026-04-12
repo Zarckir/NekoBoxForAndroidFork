@@ -80,6 +80,7 @@ class ServiceButton @JvmOverloads constructor(
 
     private var checked = false
     private var delayedAnimation: Job? = null
+    private var renderedState: BaseService.State? = null
     private lateinit var progress: BaseProgressIndicator<*>
     fun initProgress(progress: BaseProgressIndicator<*>) {
         this.progress = progress
@@ -108,14 +109,30 @@ class ServiceButton @JvmOverloads constructor(
     }
 
     fun changeState(state: BaseService.State, previousState: BaseService.State, animate: Boolean) {
+        val stateChanged = renderedState != state
         when (state) {
-            BaseService.State.Connecting -> changeState(iconConnecting, animate)
-            BaseService.State.Connected -> changeState(iconConnected, animate)
-            BaseService.State.Stopping -> {
-                changeState(iconStopping, animate && previousState == BaseService.State.Connected)
+            BaseService.State.Connecting -> if (stateChanged) {
+                changeState(iconConnecting, animate)
             }
-            else -> changeState(iconStopped, animate)
+
+            BaseService.State.Connected -> if (stateChanged) {
+                changeState(iconConnected, animate)
+            }
+
+            BaseService.State.Stopping -> {
+                if (stateChanged) {
+                    changeState(
+                        iconStopping,
+                        animate && previousState == BaseService.State.Connected
+                    )
+                }
+            }
+
+            else -> if (stateChanged) {
+                changeState(iconStopped, animate)
+            }
         }
+        renderedState = state
         checked = state == BaseService.State.Connected
         refreshDrawableState()
         val description = context.getText(if (state.canStop) R.string.stop else R.string.connect)

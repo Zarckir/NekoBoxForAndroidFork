@@ -8,7 +8,22 @@ else
   export SRC_ROOT=$(realpath .)
 fi
 
-DEPS=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin
+PREBUILT_ROOT=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt
+
+if [[ "$OSTYPE" =~ ^darwin ]]; then
+  if [ -d "$PREBUILT_ROOT/darwin-arm64/bin" ]; then
+    DEPS=$PREBUILT_ROOT/darwin-arm64/bin
+  else
+    DEPS=$PREBUILT_ROOT/darwin-x86_64/bin
+  fi
+else
+  DEPS=$PREBUILT_ROOT/linux-x86_64/bin
+fi
+
+if [ ! -d "$DEPS" ]; then
+  echo "Error: NDK toolchain not found at $DEPS"
+  exit 1
+fi
 
 export ANDROID_ARM_CC=$DEPS/armv7a-linux-androideabi21-clang
 export ANDROID_ARM_CXX=$DEPS/armv7a-linux-androideabi21-clang++
